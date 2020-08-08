@@ -66,10 +66,15 @@ def eight_point(img1, img2, k = 8):
     src_pts, dst_pts = generate_n_correspondance(img1, img2)
     if src_pts.shape[0] < 8:
         return False
-    index = np.random.choice(src_pts.shape[0], k, replace=False)
-    src_pts_selected = src_pts[index, :]
-    dst_pts_selected = dst_pts[index, :]
-    A = (dst_pts_selected[:, 1] * src_pts_selected[:, 0]).reshape((k, 1))
+    if k >= 0:
+        index = np.random.choice(src_pts.shape[0], k, replace=False)
+        src_pts_selected = src_pts[index, :]
+        dst_pts_selected = dst_pts[index, :]
+    else:
+        k = src_pts.shape[0]
+        src_pts_selected = src_pts
+        dst_pts_selected = dst_pts
+    A = (dst_pts_selected[:, 1] * src_pts_selected[:, 1]).reshape((k, 1))
     A = np.concatenate((A, (dst_pts_selected[:, 1] * src_pts_selected[:, 0]).reshape((k, 1))), axis=1)
     A = np.concatenate((A, (dst_pts_selected[:, 1]).reshape((k, 1))), axis=1)
     A = np.concatenate((A, (dst_pts_selected[:, 0] * src_pts_selected[:, 1]).reshape((k, 1))), axis=1)
@@ -92,12 +97,12 @@ def epipole_colatino(img1, img2):
     e_l = u[:, -1]
     e_r = vh.T[:, -1]
     return e_l, e_r
-
-def generate_n_correspondance(img1, img2):
-    # https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_feature2d/py_feature_homography/py_feature_homography.html
-    cv_img1 = img1.reshape((img1.shape[0], img1.shape[1], 1))
-    cv_img2 = img2.reshape((img2.shape[0], img2.shape[1], 1))
-
+def compute_F(img1, img2):
+    #
+    # cv_img1 = img1.reshape((img1.shape[0], img1.shape[1], 1))
+    # cv_img2 = img2.reshape((img2.shape[0], img2.shape[1], 1))
+    cv_img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+    cv_img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
     MIN_MATCH_COUNT = 10
     sift = cv2.xfeatures2d.SIFT_create()
     FLANN_INDEX_KDTREE = 0
@@ -112,21 +117,122 @@ def generate_n_correspondance(img1, img2):
     # store all the good matches as per Lowe's ratio test.
     good = []
     for m, n in matches:
-        if m.distance < 0.7 * n.distance:
+        if m.distance < 0.8 * n.distance:
             good.append(m)
+    # ============================================================
+    pts2 = []
+    pts1 = []
+    for i, (m, n) in enumerate(matches):
+        if m.distance < 0.8 * n.distance:
+            good.append(m)
+            pts2.append(keypoints_2[m.trainIdx].pt)
+            pts1.append(keypoints_1[m.queryIdx].pt)
+    pts1 = np.int32(pts1)
+    pts2 = np.int32(pts2)
+    F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_LMEDS)
+    return F
+def generate_n_correspondance(img1, img2):
+    #
+    # cv_img1 = img1.reshape((img1.shape[0], img1.shape[1], 1))
+    # cv_img2 = img2.reshape((img2.shape[0], img2.shape[1], 1))
+    cv_img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+    cv_img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+    MIN_MATCH_COUNT = 10
+    sift = cv2.xfeatures2d.SIFT_create()
+    FLANN_INDEX_KDTREE = 0
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    search_params = dict(checks=50)
+    # find the keypoints and descriptors with SIFT
+    keypoints_1, descriptors_1 = sift.detectAndCompute(cv_img1, None)
+    keypoints_2, descriptors_2 = sift.detectAndCompute(cv_img2, None)
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(descriptors_1, descriptors_2, k=2)
+
+    # store all the good matches as per Lowe's ratio test.
+    good = []
+    for m, n in matches:
+        if m.distance < 0.8 * n.distance:
+            good.append(m)
+    # ============================================================
+    # pts2 = []
+    # pts1 = []
+    # for i, (m, n) in enumerate(matches):
+    #     if m.distance < 0.8 * n.distance:
+    #         good.append(m)
+    #         pts2.append(keypoints_2[m.trainIdx].pt)
+    #         pts1.append(keypoints_1[m.queryIdx].pt)
+    # pts1 = np.int32(pts1)
+    # pts2 = np.int32(pts2)
+    # F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_LMEDS)
+    # print(F)
+    # ============================================================
     src_pts = np.float32([keypoints_1[m.queryIdx].pt for m in good]).reshape(-1, 2)
     src_pts = np.concatenate((np.array(src_pts[:, 1]).reshape(-1, 1), np.array(src_pts[:, 0]).reshape(-1, 1)), axis=1)
     dst_pts = np.float32([keypoints_2[m.trainIdx].pt for m in good]).reshape(-1, 2)
     dst_pts = np.concatenate((np.array(dst_pts[:, 1]).reshape(-1, 1), np.array(dst_pts[:, 0]).reshape(-1, 1)), axis=1)
-    # these need to be flipped for numpy operations
+    # these are in (y, x)
     return src_pts, dst_pts
+def use_sift_to_find_points(pair=1):
+    if pair == 1:
+        img_l = image.imread("Part2/first_pair/p11.jpg")
+        img_r = image.imread("Part2/first_pair/p12.jpg")
+    else:
+        img_l = image.imread("Part2/second_pair/p21.jpg")
+        img_r = image.imread("Part2/second_pair/p22.jpg")
+    src_pts, dst_pts = generate_n_correspondance(img_l, img_r)
+    p_l = []
+    p_r = []
+    for i in range(src_pts.shape[0]):
+        p_l.append([src_pts[i, 1], src_pts[i, 0]])
+        p_r.append([dst_pts[i, 1], dst_pts[i, 0]])
+    pairs = [p_l, p_r]
+    import pickle
+    if pair == 1:
+        with open('./Part2/first_pair/pair_points.pkl', 'wb') as f:
+            pickle.dump(pairs, f)
+    else:
+        with open('./Part2/second_pair/pair_points.pkl', 'wb') as f:
+            pickle.dump(pairs, f)
+def manually_obtain_points(img_l, count = 5):
+    def draw_circle_l(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDBLCLK:
+            cv2.circle(img_l, (x, y), 5, (0, 255, 0), -1)
+            points_l.append([x, y])
+    points_l = []
+    cv2.namedWindow('image')
+    cv2.setMouseCallback('image', draw_circle_l)
+    while (1):
+        cv2.imshow('image', img_l)
+        if cv2.waitKey(20) & 0xFF == 27:
+            break
+        if len(points_l) >= count:
+            break
+    return points_l
+def selet_points_and_save_as_pkl(pair=1, num_points=5):
+    if pair == 1:
+        img_l = image.imread("Part2/first_pair/p11.jpg")
+        img_r = image.imread("Part2/first_pair/p12.jpg")
+    else:
+        img_l = image.imread("Part2/second_pair/p21.jpg")
+        img_r = image.imread("Part2/second_pair/p22.jpg")
+    p_l = manually_obtain_points(img_l, num_points)
+    p_r = manually_obtain_points(img_r, num_points)
+    pairs = [p_l, p_r]
+    import pickle
+    if pair == 1:
+        with open('./Part2/first_pair/pair_points.pkl', 'wb') as f:
+            pickle.dump(pairs, f)
+    else:
+        with open('./Part2/second_pair/pair_points.pkl', 'wb') as f:
+            pickle.dump(pairs, f)
+def obtain_pairs_from_pickle(pkl_path):
+    import pickle
+    with open(pkl_path, 'rb') as f:
+        mynewlist = pickle.load(f)
+    return mynewlist
 if __name__ == "__main__":
-    # img1 = cv2.imread("Part2/first_pair/p11.jpg")
-    # img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
-    # img2 = cv2.imread("Part2/first_pair/p12.jpg")
-    # img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
-    # epipole_colatino(img1, img2)
-    # generate_gif("Part1/img_output/frame{}.jpeg", 30, "Part1/rot_y")
-    # generate_gif("Part1/img_output2/frame{}.jpeg", 20, "Part1/rot_x")
-    # generate_gif("Part1/img_output3/frame{}.jpeg", 20, "Part1/rot_z")
-    display_3d_point_cloud("Part1/output/output_1.txt")
+    img_l = image.imread("Part2/first_pair/p11.jpg")
+    img_r = image.imread("Part2/first_pair/p12.jpg")
+    use_sift_to_find_points(img_l, img_r)
+    # selet_points_and_save_as_pkl(1, 12)
+    # obtain_pairs_from_pickle("./Part2/first_pair/pair_points.pkl")
