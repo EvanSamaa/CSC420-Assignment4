@@ -150,7 +150,7 @@ if __name__ == "__main__":
         img_r_gray = image.imread("Part2/first_pair/p12.jpg")
     else:
         points = obtain_pairs_from_pickle("./Part2/second_pair/pair_points.pkl")
-        img_l_gray = image.imread("./Part2/second_pair/p21.jpg")
+        img_l_gray = image.imread("Part2/second_pair/p21.jpg")
         img_r_gray = image.imread("Part2/second_pair/p22.jpg")
     img_width = img_r_gray.shape[1]
     img_height = img_r_gray.shape[0]
@@ -162,6 +162,7 @@ if __name__ == "__main__":
     # approximate fundamental matrix swith 8 point algorithm
     F = eight_point(img_l_gray, img_r_gray, k=-1)
     # F = compute_F(img_l_gray, img_r_gray)
+    print(F)
     # recover Essential matrix from Fundamental matrix
     E = M.T @ F @ M
     # solve for T
@@ -172,12 +173,10 @@ if __name__ == "__main__":
     # normalize EtE
     EtE_hat = (E.T/T_mag) @ (E/T_mag)
     # recovevr T
-    print(EtE_hat)
     T_x_hat = np.sqrt(1 - np.minimum(EtE_hat[0, 0], 1))
     T_y_hat = np.sqrt(1 - np.minimum(EtE_hat[1, 1], 1))
     T_z_hat = np.sqrt(1 - np.minimum(EtE_hat[2, 2], 1))
     T_hat = np.array([T_x_hat, T_y_hat, T_z_hat])
-    print(T_hat)
     # recover R
     w_0 = np.cross(E[0]/T_mag, T_hat)
     w_1 = np.cross(E[1]/T_mag, T_hat)
@@ -186,6 +185,8 @@ if __name__ == "__main__":
     R[0] = w_0 + np.cross(w_1, w_2)
     R[1] = w_1 + np.cross(w_2, w_0)
     R[2] = w_2 + np.cross(w_0, w_1)
+    R, R2, T_hat = cv2.decomposeEssentialMat(E)
+    T_hat = T_hat.reshape((3,))
     # begin computing for each point
     coords = []
     for i in range(0, len(points[0])):
@@ -194,23 +195,18 @@ if __name__ == "__main__":
         p_r = points[1][i]
         p_l = np.array([p_l[0]-img_width/2, p_l[1]-img_height/2, f])
         p_r = np.array([p_r[0]-img_width/2, p_r[1]-img_height/2, f])
-        p_l = p_l*np.array((23.5/1000/img_width, 15.6/1000/img_height, 1))
-        p_r = p_r*np.array((23.5/1000/img_width, 15.6/1000/img_height, 1))
         # p_l = np.array([p_l[0], p_l[1], f])
         # p_r = np.array([p_r[0], p_r[1], f])
+        p_l = p_l * np.array((23.5/1000/img_width, 15.6/1000/img_height, 1))
+        p_r = p_r * np.array((23.5/1000/img_width, 15.6/1000/img_height, 1))
         system = np.zeros((3, 3))
         system[:, 0] = p_l
         system[:, 1] = -R.T @ p_r
         system[:, 2] = np.cross(p_l, R.T @ p_r)
         sol = np.linalg.inv(system) @ T_hat
         mid_point = (sol[0]*p_l + T_hat + sol[1]*R.T @ p_r)/2
-        # mid_point[0] = p_l[0]
-        # mid_point[1] = p_l[1]
         coords.append(mid_point)
     # plotting 3 rectangles
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-
     point_cloud = o3d.geometry.PointCloud()
     point_cloud.points = o3d.utility.Vector3dVector(np.array(coords))  # now they are point cloud objects
     # point_cloud.colors = o3d.utility.Vector3dVector(matrix[:, 3:] / 255)
