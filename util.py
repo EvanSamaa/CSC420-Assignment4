@@ -68,20 +68,36 @@ def eight_point(img1, img2, k = 8):
         return False
     if k >= 0:
         index = np.random.choice(src_pts.shape[0], k, replace=False)
-        src_pts_selected = src_pts[index, :]
-        dst_pts_selected = dst_pts[index, :]
+        p_l = src_pts[index, :]
+        p_r = dst_pts[index, :]
     else:
         k = src_pts.shape[0]
-        src_pts_selected = src_pts
-        dst_pts_selected = dst_pts
-    A = (dst_pts_selected[:, 1] * src_pts_selected[:, 1]).reshape((k, 1))
-    A = np.concatenate((A, (dst_pts_selected[:, 1] * src_pts_selected[:, 0]).reshape((k, 1))), axis=1)
-    A = np.concatenate((A, (dst_pts_selected[:, 1]).reshape((k, 1))), axis=1)
-    A = np.concatenate((A, (dst_pts_selected[:, 0] * src_pts_selected[:, 1]).reshape((k, 1))), axis=1)
-    A = np.concatenate((A, (dst_pts_selected[:, 0] * src_pts_selected[:, 0]).reshape((k, 1))), axis=1)
-    A = np.concatenate((A, (dst_pts_selected[:, 0]).reshape((k, 1))), axis=1)
-    A = np.concatenate((A, (src_pts_selected[:, 1]).reshape((k, 1))), axis=1)
-    A = np.concatenate((A, (src_pts_selected[:, 0]).reshape((k, 1))), axis=1)
+        p_l = src_pts
+        p_r = dst_pts
+    p_l = np.concatenate((p_l[:, 1].reshape((k, 1)), p_l[:, 0].reshape((k, 1)), np.ones((k, 1))), axis=1)
+    p_r = np.concatenate((p_r[:, 1].reshape((k, 1)), p_r[:, 0].reshape((k, 1)), np.ones((k, 1))), axis=1)
+    l_mean = np.mean(p_l, axis=0)
+    r_mean = np.mean(p_r, axis=0)
+    l_d = np.sum(np.sqrt(np.sum(np.square(p_l - l_mean), axis=1)))/k/np.sqrt(2)
+    r_d = np.sum(np.sqrt(np.sum(np.square(p_r - r_mean), axis=1)))/k/np.sqrt(2)
+    H_l = np.array([[1/l_d, 0, -l_mean[0]/l_d], [0, 1/l_d, -l_mean[1]/l_d], [0, 0, 1]])
+    H_r = np.array([[1/r_d, 0, -r_mean[0]/r_d], [0, 1/r_d, -r_mean[1]/r_d], [0, 0, 1]])
+    p_l_hat = np.zeros(p_l.shape)
+    p_r_hat = np.zeros(p_r.shape)
+
+    for i in range(0, p_l.shape[0]):
+        p_l_hat[i] = H_l @ p_l[i]
+        p_r_hat[i] = H_r @ p_r[i]
+    # p_l_hat = p_l
+    # p_r_hat = p_r
+    A = (p_r_hat[:, 0] * p_l_hat[:, 0]).reshape((k, 1))
+    A = np.concatenate((A, (p_r_hat[:, 0] * p_l_hat[:, 1]).reshape((k, 1))), axis=1)
+    A = np.concatenate((A, (p_r_hat[:, 0]).reshape((k, 1))), axis=1)
+    A = np.concatenate((A, (p_r_hat[:, 1] * p_l_hat[:, 0]).reshape((k, 1))), axis=1)
+    A = np.concatenate((A, (p_r_hat[:, 1] * p_l_hat[:, 1]).reshape((k, 1))), axis=1)
+    A = np.concatenate((A, (p_r_hat[:, 1]).reshape((k, 1))), axis=1)
+    A = np.concatenate((A, (p_l_hat[:, 0]).reshape((k, 1))), axis=1)
+    A = np.concatenate((A, (p_l_hat[:, 1]).reshape((k, 1))), axis=1)
     A = np.concatenate((A, np.ones((k, 1))), axis=1)
     u, s, vh = np.linalg.svd(A)
     F = vh.T[:, -1]
@@ -90,6 +106,12 @@ def eight_point(img1, img2, k = 8):
     s_mat_f = np.diag(s_f)
     s_mat_f[-1, -1] = 0
     F_prime = u_f @ s_mat_f @ vh_f
+    # print(F_prime)
+    F_prime = np.linalg.inv(H_r) @ F_prime @ np.linalg.inv(H_l)
+    for i in range( p_l.shape[0]):
+        # pass
+        print(p_r[i].T@F_prime @ p_l[i])
+        # print(p_r_hat[i].T @ F_prime @ p_l_hat[i])
     return F_prime
 def epipole_colatino(img1, img2):
     F = eight_point(img1, img2)
@@ -114,14 +136,19 @@ def compute_F(img1, img2):
     flann = cv2.FlannBasedMatcher(index_params, search_params)
     matches = flann.knnMatch(descriptors_1, descriptors_2, k=2)
 
+    # B[2]
     # store all the good matches as per Lowe's ratio test.
     good = []
     for m, n in matches:
-        if m.distance < 0.8 * n.distance:
+        if m.distance < 0.3 * n.distance:
             good.append(m)
+    # img = cv2.drawKeypoints(cv_img1, keypoints_1, img1)
+    # plt.imshow(img)
+    # plt.show()
     # ============================================================
     pts2 = []
     pts1 = []
+    good = []
     for i, (m, n) in enumerate(matches):
         if m.distance < 0.8 * n.distance:
             good.append(m)
@@ -130,6 +157,8 @@ def compute_F(img1, img2):
     pts1 = np.int32(pts1)
     pts2 = np.int32(pts2)
     F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_LMEDS)
+    # pts2 and pts1 are in the format of (x ,y)
+    #This F works for (x, y, 1)
     return F
 def generate_n_correspondance(img1, img2):
     #
@@ -153,19 +182,6 @@ def generate_n_correspondance(img1, img2):
     for m, n in matches:
         if m.distance < 0.8 * n.distance:
             good.append(m)
-    # ============================================================
-    # pts2 = []
-    # pts1 = []
-    # for i, (m, n) in enumerate(matches):
-    #     if m.distance < 0.8 * n.distance:
-    #         good.append(m)
-    #         pts2.append(keypoints_2[m.trainIdx].pt)
-    #         pts1.append(keypoints_1[m.queryIdx].pt)
-    # pts1 = np.int32(pts1)
-    # pts2 = np.int32(pts2)
-    # F, mask = cv2.findFundamentalMat(pts1, pts2, cv2.FM_LMEDS)
-    # print(F)
-    # ============================================================
     src_pts = np.float32([keypoints_1[m.queryIdx].pt for m in good]).reshape(-1, 2)
     src_pts = np.concatenate((np.array(src_pts[:, 1]).reshape(-1, 1), np.array(src_pts[:, 0]).reshape(-1, 1)), axis=1)
     dst_pts = np.float32([keypoints_2[m.trainIdx].pt for m in good]).reshape(-1, 2)

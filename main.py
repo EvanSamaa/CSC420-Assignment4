@@ -161,15 +161,15 @@ if __name__ == "__main__":
     # M = np.array([[-f/sx, 0, 23.5/1000/2], [0, -f/sy, 15.6/1000/2], [0, 0, 1]])
     # approximate fundamental matrix swith 8 point algorithm
     F = eight_point(img_l_gray, img_r_gray, k=-1)
+    # print(F)
     # F = compute_F(img_l_gray, img_r_gray)
-    print(F)
     # recover Essential matrix from Fundamental matrix
     E = M.T @ F @ M
     # solve for T
     EtE = E.T @ E
     eye = np.eye((3))
     # compute normalizing constant
-    T_mag = np.sqrt(np.sum(eye*EtE)/2)
+    T_mag = np.sqrt(np.trace(EtE)/2)
     # normalize EtE
     EtE_hat = (E.T/T_mag) @ (E/T_mag)
     # recovevr T
@@ -197,8 +197,8 @@ if __name__ == "__main__":
         p_r = np.array([p_r[0]-img_width/2, p_r[1]-img_height/2, f])
         # p_l = np.array([p_l[0], p_l[1], f])
         # p_r = np.array([p_r[0], p_r[1], f])
-        p_l = p_l * np.array((23.5/1000/img_width, 15.6/1000/img_height, 1))
-        p_r = p_r * np.array((23.5/1000/img_width, 15.6/1000/img_height, 1))
+        p_l = p_l * np.array((23.5/1000/img_width/2, 15.6/1000/img_height/2, 1))
+        p_r = p_r * np.array((23.5/1000/img_width/2, 15.6/1000/img_height/2, 1))
         system = np.zeros((3, 3))
         system[:, 0] = p_l
         system[:, 1] = -R.T @ p_r
@@ -206,6 +206,14 @@ if __name__ == "__main__":
         sol = np.linalg.inv(system) @ T_hat
         mid_point = (sol[0]*p_l + T_hat + sol[1]*R.T @ p_r)/2
         coords.append(mid_point)
+
+    # visualize distance
+    for i in range(0, len(points[0])):
+        cv2.circle(img_l_gray, (points[0][i][0], points[0][i][1]), 5, (255, 0), -1)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(img_l_gray, str(round(coords[i][2]*100)/100), (points[0][i][0]+5, points[0][i][1]), font, 0.5, (255, 255, 255), 2, cv2.LINE_AA)
+    plt.imshow(img_l_gray)
+    plt.show()
     # plotting 3 rectangles
     point_cloud = o3d.geometry.PointCloud()
     point_cloud.points = o3d.utility.Vector3dVector(np.array(coords))  # now they are point cloud objects
